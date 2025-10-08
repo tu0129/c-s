@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from google import genai
 from google.genai.errors import APIError
-from google.genai import types # Thêm import types
+from google.genai import types 
 
 # --- Cấu hình Trang Streamlit ---
 st.set_page_config(
@@ -15,11 +15,10 @@ st.title("Ứng dụng Phân Tích Báo Cáo Tài Chính & Chatbot 📊")
 # --- Khởi tạo Lịch sử Chat và Session (chỉ chạy một lần) ---
 # Lịch sử tin nhắn
 if "messages" not in st.session_state:
-    st.session_state.messages = []
-# Phiên chat để duy trì ngữ cảnh hội thoại
-if "chat_session" not in st.session_state:
-    st.session_state.chat_session = None
-
+    # Khởi tạo tin nhắn đầu tiên (Assistant)
+    st.session_state.messages = [{"role": "model", "content": "Xin chào! Tôi là trợ lý tài chính AI của bạn. Hãy hỏi tôi bất cứ điều gì về phân tích tài chính hoặc các chỉ số bạn quan tâm."}]
+    # Lưu ý: Trong API của Gemini, vai trò là 'user' và 'model'.
+    
 # --- Hàm tính toán chính (Sử dụng Caching để Tối ưu hiệu suất) ---
 @st.cache_data
 def process_financial_data(df):
@@ -83,57 +82,43 @@ def get_ai_analysis(data_for_ai, api_key):
     except Exception as e:
         return f"Đã xảy ra lỗi không xác định: {e}"
 
-# --- Hàm khởi tạo Chat Session ---
-def setup_chat_session(api_key):
-    """Khởi tạo hoặc kiểm tra phiên chat của Gemini."""
-    if st.session_state.chat_session is None:
-        try:
-            # Khởi tạo client 
-            # LƯU Ý: client được khởi tạo lại trong handle_chat_input để tránh bị đóng
-            client = genai.Client(api_key=api_key)
-            
-            # Hệ thống hướng dẫn cho Chatbot
-            system_instruction = "Bạn là một trợ lý tài chính thân thiện và chuyên nghiệp. Hãy trả lời các câu hỏi về tài chính, kinh doanh, và các chỉ số tài chính một cách rõ ràng và dễ hiểu."
-            
-            # Truyền system instruction qua GenerateContentConfig
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction
-            )
-            
-            st.session_state.chat_session = client.chats.create(
-                model="gemini-2.5-flash",
-                config=config # Truyền config vào đây
-            )
-            # Thêm tin nhắn chào mừng ban đầu
-            st.session_state.messages.append(
-                {"role": "assistant", "content": "Xin chào! Tôi là trợ lý tài chính AI của bạn. Hãy hỏi tôi bất cứ điều gì về phân tích tài chính hoặc các chỉ số bạn quan tâm."}
-            )
-            
-        except Exception as e:
-            st.error(f"Lỗi khởi tạo Chat Session: Vui lòng kiểm tra Khóa API. Chi tiết lỗi: {e}")
-            return False
-    return True
-
 # --- Hàm xử lý Input Chat ---
-def handle_chat_input(prompt):
-    """Gửi prompt đến Gemini Chat Session và cập nhật lịch sử."""
-    st.session_state.messages.append({"role": "user", "content": prompt})
+def handle_chat_input(prompt, api_key_chat):
+    """Gửi prompt đến Gemini API bằng cách truyền toàn bộ lịch sử chat."""
     
-    # Khởi tạo lại client để tránh lỗi "client has been closed" do rerun Streamlit
-    api_key_chat = st.secrets.get("GEMINI_API_KEY")
-    if not api_key_chat:
-        st.session_state.messages.append({"role": "assistant", "content": "Lỗi: Không tìm thấy Khóa API 'GEMINI_API_KEY'."})
-        return
+    # 1. Thêm tin nhắn mới của người dùng vào lịch sử (sử dụng role 'user' trong API)
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
     try:
-        # Khởi tạo client
+        # Khởi tạo client cho mỗi lần gọi API
         client = genai.Client(api_key=api_key_chat)
         
-        # Gửi tin nhắn và nhận phản hồi từ phiên chat đã có ngữ cảnh
-        response = st.session_state.chat_session.send_message(prompt)
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
+        # Hệ thống hướng dẫn (System Instruction)
+        system_instruction = "Bạn là một trợ lý tài chính thân thiện và chuyên nghiệp. Hãy trả lời các câu hỏi về tài chính, kinh doanh, và các chỉ số tài chính một cách rõ ràng và dễ hiểu."
+        
+        # Truyền system instruction qua GenerateContentConfig
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction
+        )
+        
+        # Chuyển đổi lịch sử chat của Streamlit sang định dạng API
+        # Lịch sử chat API: [{'role': 'user', 'parts': [{'text': '...'}, ...]}, ...]
+        history_for_api = [
+            {'role': msg["role"], 'parts': [{'text': msg["content"]}]}
+            for msg in st.session_state.messages
+        ]
+
+        # Gửi toàn bộ lịch sử (bao gồm prompt mới nhất)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=history_for_api,
+            config=config
+        )
+        
+        # 2. Thêm phản hồi của AI vào lịch sử (sử dụng role 'model' trong API)
+        st.session_state.messages.append({"role": "model", "content": response.text})
     except Exception as e:
-        st.session_state.messages.append({"role": "assistant", "content": f"Đã xảy ra lỗi trong quá trình chat: {e}"})
+        st.session_state.messages.append({"role": "model", "content": f"Đã xảy ra lỗi trong quá trình chat: {e}"})
 
 
 # --- Chức năng 1: Tải File ---
@@ -255,17 +240,17 @@ st.subheader("6. Trợ lý Hỏi đáp Tài chính AI (Chatbot) 💬")
 api_key_chat = st.secrets.get("GEMINI_API_KEY")
 
 if api_key_chat:
-    # 1. Khởi tạo/kiểm tra phiên chat session
-    if setup_chat_session(api_key_chat):
-        # 2. Hiển thị lịch sử tin nhắn
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+    # Hiển thị lịch sử tin nhắn
+    for message in st.session_state.messages:
+        # Sử dụng vai trò 'assistant' để hiển thị tin nhắn 'model' của API
+        display_role = "assistant" if message["role"] == "model" else "user"
+        with st.chat_message(display_role):
+            st.markdown(message["content"])
 
-        # 3. Xử lý input mới
-        if prompt := st.chat_input("Hỏi tôi về các chỉ số tài chính, phân tích Bảng Cân đối Kế toán, hoặc các khái niệm liên quan..."):
-            handle_chat_input(prompt)
-            # Rerun để hiển thị tin nhắn mới ngay lập tức
-            st.rerun() 
+    # Xử lý input mới
+    if prompt := st.chat_input("Hỏi tôi về các chỉ số tài chính, phân tích Bảng Cân đối Kế toán, hoặc các khái niệm liên quan..."):
+        handle_chat_input(prompt, api_key_chat)
+        # Rerun để hiển thị tin nhắn mới ngay lập tức
+        st.rerun() 
 else:
     st.warning("Vui lòng cấu hình Khóa 'GEMINI_API_KEY' trong Streamlit Secrets để sử dụng Trợ lý AI.")
