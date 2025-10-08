@@ -88,13 +88,14 @@ def setup_chat_session(api_key):
     """Khởi tạo hoặc kiểm tra phiên chat của Gemini."""
     if st.session_state.chat_session is None:
         try:
-            # Khởi tạo client và chat session mới
+            # Khởi tạo client 
+            # LƯU Ý: client được khởi tạo lại trong handle_chat_input để tránh bị đóng
             client = genai.Client(api_key=api_key)
             
             # Hệ thống hướng dẫn cho Chatbot
             system_instruction = "Bạn là một trợ lý tài chính thân thiện và chuyên nghiệp. Hãy trả lời các câu hỏi về tài chính, kinh doanh, và các chỉ số tài chính một cách rõ ràng và dễ hiểu."
             
-            # Khắc phục lỗi: Truyền system instruction qua GenerateContentConfig
+            # Truyền system instruction qua GenerateContentConfig
             config = types.GenerateContentConfig(
                 system_instruction=system_instruction
             )
@@ -107,6 +108,7 @@ def setup_chat_session(api_key):
             st.session_state.messages.append(
                 {"role": "assistant", "content": "Xin chào! Tôi là trợ lý tài chính AI của bạn. Hãy hỏi tôi bất cứ điều gì về phân tích tài chính hoặc các chỉ số bạn quan tâm."}
             )
+            
         except Exception as e:
             st.error(f"Lỗi khởi tạo Chat Session: Vui lòng kiểm tra Khóa API. Chi tiết lỗi: {e}")
             return False
@@ -117,7 +119,16 @@ def handle_chat_input(prompt):
     """Gửi prompt đến Gemini Chat Session và cập nhật lịch sử."""
     st.session_state.messages.append({"role": "user", "content": prompt})
     
+    # Khởi tạo lại client để tránh lỗi "client has been closed" do rerun Streamlit
+    api_key_chat = st.secrets.get("GEMINI_API_KEY")
+    if not api_key_chat:
+        st.session_state.messages.append({"role": "assistant", "content": "Lỗi: Không tìm thấy Khóa API 'GEMINI_API_KEY'."})
+        return
+
     try:
+        # Khởi tạo client
+        client = genai.Client(api_key=api_key_chat)
+        
         # Gửi tin nhắn và nhận phản hồi từ phiên chat đã có ngữ cảnh
         response = st.session_state.chat_session.send_message(prompt)
         st.session_state.messages.append({"role": "assistant", "content": response.text})
