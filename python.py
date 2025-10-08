@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from google import genai
 from google.genai.errors import APIError
+from google.genai import types # Thêm import types
 
 # --- Cấu hình Trang Streamlit ---
 st.set_page_config(
@@ -89,11 +90,18 @@ def setup_chat_session(api_key):
         try:
             # Khởi tạo client và chat session mới
             client = genai.Client(api_key=api_key)
+            
             # Hệ thống hướng dẫn cho Chatbot
             system_instruction = "Bạn là một trợ lý tài chính thân thiện và chuyên nghiệp. Hãy trả lời các câu hỏi về tài chính, kinh doanh, và các chỉ số tài chính một cách rõ ràng và dễ hiểu."
+            
+            # Khắc phục lỗi: Truyền system instruction qua GenerateContentConfig
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction
+            )
+            
             st.session_state.chat_session = client.chats.create(
                 model="gemini-2.5-flash",
-                system_instruction=system_instruction
+                config=config # Truyền config vào đây
             )
             # Thêm tin nhắn chào mừng ban đầu
             st.session_state.messages.append(
